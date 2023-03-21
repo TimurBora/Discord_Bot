@@ -17,9 +17,7 @@ class Random_Images(commands.Cog):
         random_image_url = f"https://random.imagecdn.app/{width}/{height}"
         image_response = requests.get(random_image_url)
         
-        image = Image.open(BytesIO(image_response.content)) # Перекодируем фотографию
-        image.save("random_image.jpeg")
-        file = disnake.File("random_image.jpeg") # Создаём файл который отправим в чат
+        file = disnake.File(BytesIO(image_response.content), filename = "random_image.jpeg") # Создаём файл который отправим в чат
         
         await ext.send(file=file)
 
