@@ -1,7 +1,7 @@
 import disnake
 from disnake.ext import commands
 
-intents = disnake.Intents.default()
+intents = disnake.Intents.all()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -22,6 +22,10 @@ async def on_voice_state_update(ext, before, after):
         await text_channel.send(f"{ext.mention} usao u kanal: {ext.voice.channel.name}")
     else:
         await text_channel.send(f"{ext.mention} izasao je iz kanala")
+
+@bot.event
+async def on_command_error(ext, error):
+    await ext.send(error)
     
     
 

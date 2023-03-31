@@ -50,13 +50,19 @@ class Quote(commands.Cog):
 
         quote = random.choice(messages)
         await ext.send(quote.content)
-        
-        
-        
 
+class Count(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
 
+    @commands.slash_command()
+    async def counting(self, ext, start : int, limit : int):
+        for i in range(start, limit):
+            await ext.send(i)
+        
         
 def setup(bot):
     bot.add_cog(Announcement(bot))
     bot.add_cog(Translator_Disnake(bot))
     bot.add_cog(Quote(bot))
+    bot.add_cog(Count(bot))
