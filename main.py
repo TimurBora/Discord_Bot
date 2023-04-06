@@ -16,14 +16,6 @@ async def on_member_join(member):
     await channel.send(f"Cao {member.mention}, kako si?")
 
 @bot.event
-async def on_voice_state_update(ext, before, after):
-    text_channel = bot.get_channel(1083720706895908946)
-    if after.channel != None:
-        await text_channel.send(f"{ext.mention} usao u kanal: {ext.voice.channel.name}")
-    else:
-        await text_channel.send(f"{ext.mention} izasao je iz kanala")
-
-@bot.event
 async def on_command_error(ext, error):
     await ext.send(error)
     
