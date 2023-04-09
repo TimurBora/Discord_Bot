@@ -64,23 +64,24 @@ class MusicBotConnection(commands.Cog):
 
 class MusicYoutube:
     def __init__(self):
+        self.loop = asyncio.get_event_loop()
         self.youtube_options = {'format': 'bestaudio', 'noplaylist':'True'}
         self.youtube_dl = YoutubeDL(self.youtube_options)
 
     async def get_url(self, url):
-        info_youtube = self.youtube_dl.extract_info(url, download=False)
+        info_youtube = await self.loop.run_in_executor(None, self.youtube_dl.extract_info, url, False)
         URL_video = info_youtube['url']
 
         return URL_video
 
     async def get_url_with_query(self, query):
         max_results = 5
-        video_results = self.youtube_dl.extract_info(f"ytsearch{max_results}:{query}", download=False)['entries']
-
+        video_results = (await self.loop.run_in_executor(None, self.youtube_dl.extract_info, f"ytsearch{max_results}:{query}", False))['entries']
+        
         return video_results
 
     async def get_name(self, url):
-        info_youtube = self.youtube_dl.extract_info(url, download=False)
+        info_youtube = await self.loop.run_in_executor(None, self.youtube_dl.extract_info, url, False)
         name_video = info_youtube['title']
 
         return name_video
@@ -137,27 +138,32 @@ class MusicBotPlaying(commands.Cog):
 
     @commands.command()
     async def search(self, ext, *, query):
-        music_number = 1
-        music_choice_embed = disnake.Embed(
-            title='Music Choice',
-            description='Выбирай число от 1 до 5.',
-            color=disnake.Colour.blue())
+        bot_voice_client = disnake.utils.get(self.bot.voice_clients, guild=ext.author.guild)
+        voice_state = ext.author.voice
+        if await self.check_bot_voice(ext, bot_voice_client, voice_state):
+            music_number = 1
+            music_choice_embed = disnake.Embed(
+                title='Music Choice',
+                description='Выбирай число от 1 до 5.',
+                color=disnake.Colour.blue())
 
-        query_videos = await self.youtube.get_url_with_query(query)
+            query_videos = await self.youtube.get_url_with_query(query)
 
-        for video in query_videos:
-            music_choice_embed.add_field(name=video['title'], value=f"{music_number}. {video['webpage_url']}", inline=False)
-            music_number += 1
-
-        await ext.send(embed=music_choice_embed)
-        await self.choice(ext, query_videos)
+            for video in query_videos:
+                music_choice_embed.add_field(name=video['title'], value=f"{music_number}. {video['webpage_url']}", inline=False)
+                music_number += 1
+                
+            await ext.send(embed=music_choice_embed)
+            
+            choice = await self.choice(ext, query_videos) - 1
+            await self.play_song(ext, query_videos[choice]['webpage_url'])
 
     async def choice(self, ext, query_videos):
         def check(message):
-            return message.channel == ext.channel and message.author == ext.author and message.content in [1, 2, 3, 4, 5]
+            return message.channel == ext.channel and message.author == ext.author and str(message.content) in ['1', '2', '3', '4', '5']
 
-        music_choice = await self.bot.wait_for('message', check=check, timeout=30.0)
-        
+        music_choice = await self.bot.wait_for('message', check=check, timeout=40.0)
+        return int(music_choice.content)
         
     @commands.command()
     async def skip(self, ext):
