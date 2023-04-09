@@ -22,6 +22,12 @@ class SQLMusic:
         await self.cursor.execute(create_table_query)
         await self.sqlite_connection.commit()
 
+    async def shutdown_delete(self):
+        shutdown_delete_query = '''DELETE FROM music_menu'''
+
+        await self.cursor.execute(create_table_query)
+        await self.sqlite_connection.commit()
+
     async def delete_all_row(self, guild_id):
         delete_rows_query = '''DELETE FROM music_menu WHERE guild_id = ?'''
 
