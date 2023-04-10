@@ -43,10 +43,6 @@ class MusicBotConnection(commands.Cog):
             if bot_voice_client and len(bot_voice_client.channel.members) == 1:
                 await bot_voice_client.disconnect()
                 await self.MusicSQL.delete_all_row(member.guild.id)
-
-    @commands.Cog.listener()
-    async def on_disconnect(self):
-        await self.MusicSQL.shutdown_delete()
                 
     async def check_bot_voice(self, ext, bot_voice_client, voice_state):
         if bot_voice_client is None:
@@ -68,23 +64,16 @@ class MusicYoutube:
         self.youtube_options = {'format': 'bestaudio', 'noplaylist':'True'}
         self.youtube_dl = YoutubeDL(self.youtube_options)
 
-    async def get_url(self, url):
+    async def get_info(self, url):
         info_youtube = await self.loop.run_in_executor(None, self.youtube_dl.extract_info, url, False)
-        URL_video = info_youtube['url']
 
-        return URL_video
+        return info_youtube
 
-    async def get_url_with_query(self, query):
+    async def get_info_with_query(self, query):
         max_results = 5
         video_results = (await self.loop.run_in_executor(None, self.youtube_dl.extract_info, f"ytsearch{max_results}:{query}", False))['entries']
         
         return video_results
-
-    async def get_name(self, url):
-        info_youtube = await self.loop.run_in_executor(None, self.youtube_dl.extract_info, url, False)
-        name_video = info_youtube['title']
-
-        return name_video
 
 
 class MusicBotPlaying(commands.Cog):
@@ -114,23 +103,28 @@ class MusicBotPlaying(commands.Cog):
                 asyncio.run_coroutine_threadsafe(play_next_song, self.loop)
 
         if await self.check_bot_voice(ext, bot_voice_client, voice_state):
-            URL_video = await self.youtube.get_url(url)
+            video_info = await self.youtube.get_info(url)
             if bot_voice_client.is_playing() or bot_voice_client.is_paused():
                 try:
-                    await self.MusicSQL.add_music(ext.guild.id, url, await self.youtube.get_name(url))
+                    await self.MusicSQL.add_music(ext.guild.id, url, video_info['title'])
                 except sqlite3.IntegrityError:
                     await ext.send('Ta muzika je vec u menu!')
 
             elif len(await self.MusicSQL.select_all_music(ext.guild.id)) == 0 and not bot_voice_client.is_playing():
-                await self.MusicSQL.add_music(ext.guild.id, url, await self.youtube.get_name(url))
-                audio_source = FFmpegPCMAudio(URL_video, **self.FFMPEG_OPTIONS)
+                try:
+                    await self.MusicSQL.add_music(ext.guild.id, url, video_info['title'])
+                except sqlite3.IntegrityError:
+                    await ext.send('Ta muzika je vec u menu!')
+                audio_source = FFmpegPCMAudio(video_info['url'], **self.FFMPEG_OPTIONS)
 
                 bot_voice_client.play(audio_source, after=next_song)
+                await ext.send(f"Play: {video_info['title']}")
 
             elif len(await self.MusicSQL.select_all_music(ext.guild.id)) > 0 and not add_music:
-                audio_source = FFmpegPCMAudio(URL_video, **self.FFMPEG_OPTIONS)
+                audio_source = FFmpegPCMAudio(video_info['url'], **self.FFMPEG_OPTIONS)
 
-                bot_voice_client.play(audio_source, after=next_song)        
+                bot_voice_client.play(audio_source, after=next_song)
+                await ext.send(f"Playing: {video_info['title']}")
 
     @commands.command()
     async def play(self, ext, url : str, add_music=True):
@@ -147,23 +141,29 @@ class MusicBotPlaying(commands.Cog):
                 description='Выбирай число от 1 до 5.',
                 color=disnake.Colour.blue())
 
-            query_videos = await self.youtube.get_url_with_query(query)
+            info_videos = await self.youtube.get_info_with_query(query)
 
-            for video in query_videos:
+            for video in info_videos:
                 music_choice_embed.add_field(name=video['title'], value=f"{music_number}. {video['webpage_url']}", inline=False)
                 music_number += 1
                 
             await ext.send(embed=music_choice_embed)
             
-            choice = await self.choice(ext, query_videos) - 1
-            await self.play_song(ext, query_videos[choice]['webpage_url'])
+            choice = await self.choice(ext, info_videos)
+            if choice is None:
+                await ext.send("Proslo je vreme biranja!")
+            else:
+                await self.play_song(ext, info_videos[choice-1]['webpage_url'])
 
-    async def choice(self, ext, query_videos):
-        def check(message):
-            return message.channel == ext.channel and message.author == ext.author and str(message.content) in ['1', '2', '3', '4', '5']
-
-        music_choice = await self.bot.wait_for('message', check=check, timeout=40.0)
-        return int(music_choice.content)
+    async def choice(self, ext, info_videos):
+        try:
+            def check(message):
+                return message.channel == ext.channel and message.author == ext.author and str(message.content) in ['1', '2', '3', '4', '5']
+                
+            music_choice = await self.bot.wait_for('message', check=check, timeout=30.0)
+            return int(music_choice.content)
+        except asyncio.exceptions.TimeoutError:
+            return None
         
     @commands.command()
     async def skip(self, ext):
