@@ -1,5 +1,7 @@
 import disnake
 from disnake.ext import commands
+from disnake.ext.commands import CommandNotFound
+
 
 intents = disnake.Intents.all()
 intents.message_content = True
@@ -17,7 +19,8 @@ async def on_member_join(member):
 
 @bot.event
 async def on_command_error(ext, error):
-    await ext.send(error)
+    if not isinstance(error, CommandNotFound):
+        await ext.send(error)
 
 bot.load_extensions("cogs")
 bot.run("MTA4MzcyMTAwNDkyNjM4MjA5MA.GKzblP.V7gHuUx4V6o32lNymFxkrfD_5rOjN1BYF4IqiE")

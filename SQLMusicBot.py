@@ -14,7 +14,6 @@ class SQLMusic:
         self.cursor = await self.sqlite_connection.cursor()
         await self.create_table()
         
-
     async def create_table(self):
         create_table_query = '''CREATE TABLE IF NOT EXISTS music_menu(
                                 guild_id INTEGER,

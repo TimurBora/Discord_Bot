@@ -6,14 +6,29 @@ import nacl
 import ffmpeg
 import sqlite3
 from yt_dlp import YoutubeDL
+from yt_dlp import DownloadError
 from disnake.ext import commands
 from disnake import FFmpegPCMAudio
 from SQLMusicBot import SQLMusic
 
+
+async def check_bot_voice(ext, bot_voice_client, voice_state):
+    if bot_voice_client is None:
+        await ext.send("Bot mora da bude u vojsu!")
+
+    elif voice_state is None:
+        await ext.send("Vi morati biti u vojsu!")
+
+    elif bot_voice_client.channel != voice_state.channel:
+        await ext.send("Vi morate biti zajedno sa botom u vojsu!")
+
+    elif bot_voice_client.channel == voice_state.channel:
+        return True
+        
+
 class MusicBotConnection(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.MusicSQL = SQLMusic()
 
     @commands.command(name='join')
     async def connect_to_voice(self, ext):
@@ -29,11 +44,11 @@ class MusicBotConnection(commands.Cog):
         voice_state = ext.author.voice
         bot_voice_client = disnake.utils.get(self.bot.voice_clients, guild=ext.guild)
         
-        if self.check_bot_voice(ext, bot_voice_client, voice_state):
+        if await check_bot_voice(ext, bot_voice_client, voice_state):
             await bot_voice_client.disconnect()
             await ext.send("Iskljucili ste bota iz vojsa!")
 
-            await self.MusicSQL.delete_all_row(ext.guild.id)
+            await MusicSQL.delete_all_row(ext.guild.id)
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
@@ -42,20 +57,7 @@ class MusicBotConnection(commands.Cog):
             
             if bot_voice_client and len(bot_voice_client.channel.members) == 1:
                 await bot_voice_client.disconnect()
-                await self.MusicSQL.delete_all_row(member.guild.id)
-                
-    async def check_bot_voice(self, ext, bot_voice_client, voice_state):
-        if bot_voice_client is None:
-            await ext.send("Bot mora da bude u vojsu!")
-
-        elif voice_state is None:
-            await ext.send("Vi morati biti u vojsu!")
-
-        elif bot_voice_client.channel != voice_state.channel:
-            await ext.send("Vi morate biti zajedno sa botom u vojsu!")
-
-        elif bot_voice_client.channel == voice_state.channel:
-            return True
+                await MusicSQL.delete_all_row(member.guild.id)
 
 
 class MusicYoutube:
@@ -80,68 +82,69 @@ class MusicBotPlaying(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.loop = asyncio.get_event_loop()
-        self.MusicSQL = SQLMusic()
         self.FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
-        self.youtube = MusicYoutube()
 
     async def play_song(self, ext, url, add_music=True):
         bot_voice_client = disnake.utils.get(self.bot.voice_clients, guild=ext.author.guild)
         voice_state = ext.author.voice
 
-        def next_song(error):
-            delete_row = self.MusicSQL.delete_row(ext.guild.id, url)
-            asyncio.run_coroutine_threadsafe(delete_row, self.loop)
-            
-            select_all_music_sync = self.MusicSQL.select_all_music(ext.guild.id)
-            select_all_music_async = len(asyncio.run_coroutine_threadsafe(select_all_music_sync, self.loop).result())
-
-            if select_all_music_async > 0:
-                info_url_sync = self.MusicSQL.select_music_url(ext.guild.id)
-                info_url_async = asyncio.run_coroutine_threadsafe(info_url_sync, self.loop)
-                
-                play_next_song = self.play_song(ext, info_url_async.result(), False)
-                asyncio.run_coroutine_threadsafe(play_next_song, self.loop)
-
-        if await self.check_bot_voice(ext, bot_voice_client, voice_state):
-            video_info = await self.youtube.get_info(url)
+        if await check_bot_voice(ext, bot_voice_client, voice_state):
+            video_info = await Youtube.get_info(url)
             if bot_voice_client.is_playing() or bot_voice_client.is_paused():
-                try:
-                    await self.MusicSQL.add_music(ext.guild.id, url, video_info['title'])
-                except sqlite3.IntegrityError:
-                    await ext.send('Ta muzika je vec u menu!')
+                await self.add_music_to_db(ext, url, video_info['title'])
 
-            elif len(await self.MusicSQL.select_all_music(ext.guild.id)) == 0 and not bot_voice_client.is_playing():
-                try:
-                    await self.MusicSQL.add_music(ext.guild.id, url, video_info['title'])
-                except sqlite3.IntegrityError:
-                    await ext.send('Ta muzika je vec u menu!')
+            elif len(await MusicSQL.select_all_music(ext.guild.id)) == 0 and not bot_voice_client.is_playing():
+                await self.add_music_to_db(ext, url, video_info['title'])
                 audio_source = FFmpegPCMAudio(video_info['url'], **self.FFMPEG_OPTIONS)
 
-                bot_voice_client.play(audio_source, after=next_song)
+                bot_voice_client.play(audio_source, after=lambda error: self.next_song(error=error, ext=ext, url=url))
+
                 await ext.send(f"Play: {video_info['title']}")
 
-            elif len(await self.MusicSQL.select_all_music(ext.guild.id)) > 0 and not add_music:
+            elif len(await MusicSQL.select_all_music(ext.guild.id)) > 0 and not add_music:
                 audio_source = FFmpegPCMAudio(video_info['url'], **self.FFMPEG_OPTIONS)
 
-                bot_voice_client.play(audio_source, after=next_song)
+                bot_voice_client.play(audio_source, after=lambda error: self.next_song(error=error, ext=ext, url=url))
                 await ext.send(f"Playing: {video_info['title']}")
+
+    async def add_music_to_db(self, ext, url, title):
+        try:
+            await MusicSQL.add_music(ext.guild.id, url, title)
+            await ext.send('Ваша музыка поставлена в очередь')
+        except sqlite3.IntegrityError:
+            await ext.send('Ta muzika je vec u menu!')
+
+    def next_song(self, error, ext, url):
+        delete_row = asyncio.run(MusicSQL.delete_row(ext.guild.id, url))
+            
+        select_all_music = asyncio.run(MusicSQL.select_all_music(ext.guild.id))
+
+        if len(select_all_music) > 0:
+            info_url = asyncio.run(MusicSQL.select_music_url(ext.guild.id))
+                
+            play_next_song = self.play_song(ext, info_url, False)
+            asyncio.run_coroutine_threadsafe(play_next_song, self.loop)
 
     @commands.command()
     async def play(self, ext, url : str, add_music=True):
-        await self.play_song(ext, url)
+        try:
+            await self.play_song(ext, url)
+        except DownloadError:
+            await ext.send('Ne postoji taj link!')
+            
 
     @commands.command()
     async def search(self, ext, *, query):
         bot_voice_client = disnake.utils.get(self.bot.voice_clients, guild=ext.author.guild)
         voice_state = ext.author.voice
-        if await self.check_bot_voice(ext, bot_voice_client, voice_state):
+        if await check_bot_voice(ext, bot_voice_client, voice_state):
             music_number = 1
             music_choice_embed = disnake.Embed(
                 title='Music Choice',
                 description='Выбирай число от 1 до 5.',
                 color=disnake.Colour.blue())
 
-            info_videos = await self.youtube.get_info_with_query(query)
+            info_videos = await Youtube.get_info_with_query(query)
 
             for video in info_videos:
                 music_choice_embed.add_field(name=video['title'], value=f"{music_number}. {video['webpage_url']}", inline=False)
@@ -164,44 +167,18 @@ class MusicBotPlaying(commands.Cog):
             return int(music_choice.content)
         except asyncio.exceptions.TimeoutError:
             return None
-        
-    @commands.command()
-    async def skip(self, ext):
-        bot_voice_client = disnake.utils.get(self.bot.voice_clients, guild=ext.author.guild)
-        voice_state = ext.author.voice
-        
-        if await self.check_bot_voice(ext, bot_voice_client, voice_state):
-            if not bot_voice_client.is_playing():
-                await ext.send('Bot ne igra nista!')
-
-            elif bot_voice_client.is_playing():
-                bot_voice_client.stop()
-
-    async def check_bot_voice(self, ext, bot_voice_client, voice_state):
-        if bot_voice_client is None:
-            await ext.send("Bot mora da bude u vojsu!")
-
-        elif voice_state is None:
-            await ext.send("Vi morati biti u vojsu!")
-
-        elif bot_voice_client.channel != voice_state.channel:
-            await ext.send("Vi morate biti zajedno sa botom u vojsu!")
-
-        elif bot_voice_client.channel == voice_state.channel:
-            return True
 
 
 class MusicBotCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.MusicSQL = SQLMusic()
 
-    @commands.command()
-    async def pause(self, ext):
+    @commands.command(name='pause')
+    async def resume_and_pause(self, ext):
         bot_voice_client = disnake.utils.get(self.bot.voice_clients, guild=ext.author.guild)
         voice_state = ext.author.voice
 
-        if await self.check_bot_voice(ext, bot_voice_client, voice_state):
+        if await check_bot_voice(ext, bot_voice_client, voice_state):
             if bot_voice_client.is_playing():
                 bot_voice_client.pause()
 
@@ -212,6 +189,18 @@ class MusicBotCommands(commands.Cog):
                 await ext.send("Bot nista ne igra!")
 
     @commands.command()
+    async def skip(self, ext):
+        bot_voice_client = disnake.utils.get(self.bot.voice_clients, guild=ext.author.guild)
+        voice_state = ext.author.voice
+        
+        if await check_bot_voice(ext, bot_voice_client, voice_state):
+            if not bot_voice_client.is_playing():
+                await ext.send('Bot ne igra nista!')
+
+            elif bot_voice_client.is_playing():
+                bot_voice_client.stop()
+
+    @commands.command()
     async def music_menu(self, ext):
         music_menu_embed = disnake.Embed(
             title='Music Menu',
@@ -219,26 +208,16 @@ class MusicBotCommands(commands.Cog):
             color=disnake.Colour.blue())
 
         
-        all_music = await self.MusicSQL.select_all_music(ext.guild.id)
+        all_music = await MusicSQL.select_all_music(ext.guild.id)
         for music in all_music:
             music_menu_embed.add_field(name=music[2], value=music[1], inline=False)
 
         await ext.send(embed=music_menu_embed)
-    
-    async def check_bot_voice(self, ext, bot_voice_client, voice_state):
-        if bot_voice_client is None:
-            await ext.send("Bot mora da bude u vojsu!")
 
-        elif voice_state is None:
-            await ext.send("Vi morati biti u vojsu!")
 
-        elif bot_voice_client.channel != voice_state.channel:
-            await ext.send("Vi morate biti zajedno sa botom u vojsu!")
+MusicSQL = SQLMusic()
+Youtube = MusicYoutube()
 
-        elif bot_voice_client.channel == voice_state.channel:
-            return True
-
-           
 def setup(bot):
     bot.add_cog(MusicBotConnection(bot))
     bot.add_cog(MusicBotPlaying(bot))
