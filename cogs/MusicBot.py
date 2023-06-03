@@ -94,12 +94,12 @@ class MusicBotPlaying(commands.Cog):
                 await self.add_music_to_db(ext, url, video_info['title'])
 
             elif len(await MusicSQL.select_all_music(ext.guild.id)) == 0 and not bot_voice_client.is_playing():
-                await self.add_music_to_db(ext, url, video_info['title'])
-                audio_source = FFmpegPCMAudio(video_info['url'], **self.FFMPEG_OPTIONS)
+                if await self.add_music_to_db(ext, url, video_info['title']):
+                    audio_source = FFmpegPCMAudio(video_info['url'], **self.FFMPEG_OPTIONS)
 
-                bot_voice_client.play(audio_source, after=lambda error: self.next_song(error=error, ext=ext, url=url))
+                    bot_voice_client.play(audio_source, after=lambda error: self.next_song(error=error, ext=ext, url=url))
 
-                await ext.send(f"Play: {video_info['title']}")
+                    await ext.send(f"Play: {video_info['title']}")
 
             elif len(await MusicSQL.select_all_music(ext.guild.id)) > 0 and not add_music:
                 audio_source = FFmpegPCMAudio(video_info['url'], **self.FFMPEG_OPTIONS)
@@ -111,6 +111,7 @@ class MusicBotPlaying(commands.Cog):
         try:
             await MusicSQL.add_music(ext.guild.id, url, title)
             await ext.send('Ваша музыка поставлена в очередь')
+            return True
         except sqlite3.IntegrityError:
             await ext.send('Ta muzika je vec u menu!')
 

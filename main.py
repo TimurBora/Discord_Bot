@@ -7,6 +7,8 @@ intents = disnake.Intents.all()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+bot_run_file = open("C:\Users\admin\Desktop\Programming projects\Code\Code.txt", "r")
+bot_api_code = bot_run_file.read()
         
 @bot.event
 async def on_ready():
@@ -23,4 +25,4 @@ async def on_command_error(ext, error):
         await ext.send(error)
 
 bot.load_extensions("cogs")
-bot.run("MTA4MzcyMTAwNDkyNjM4MjA5MA.GKzblP.V7gHuUx4V6o32lNymFxkrfD_5rOjN1BYF4IqiE")
+bot.run(bot_api_code)
